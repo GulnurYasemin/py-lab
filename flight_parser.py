@@ -6,28 +6,34 @@ from datetime import datetime
 from typing import List, Dict, Tuple
 
 
-# === CHANGE THESE BEFORE SUBMITTING ===
-STUDENT_ID = "123456"        # <-- kendi student id
-STUDENT_NAME = "Name"        # <-- kendi adın
-STUDENT_LASTNAME = "Lastname"  # <-- kendi soyadın
+STUDENT_ID = "231ADB101"          
+STUDENT_NAME = "Gulnur Yasemin"          
+STUDENT_LASTNAME = "Uygun"  
 
 
+
+# VALIDATION FUNCTION
+ 
 def validate_flight_row(fields: List[str]) -> Tuple[bool, Dict, List[str]]:
     """
-    Validate a list of CSV fields representing one flight.
-    Returns (is_valid, flight_dict_or_empty, error_messages_list).
+    Validate one CSV line (after splitting by comma).
+
+    Returns:
+      - is_valid (bool)
+      - flight_dict (dict if valid, {} if not)
+      - error_messages (list of readable error strings)
     """
     errors = []
 
-    # Basic field count check
+    # CSV must contain exactly 6 fields
     if len(fields) < 6:
         errors.append("missing required fields")
         return False, {}, errors
 
-    # Take only first 6, ignore extra columns if any
+    # Extract & clean fields
     flight_id, origin, destination, dep_str, arr_str, price_str = [f.strip() for f in fields[:6]]
 
-    # Check for missing individual required fields
+    # Check required fields are not empty
     if not flight_id:
         errors.append("missing flight_id field")
     if not origin:
@@ -41,53 +47,55 @@ def validate_flight_row(fields: List[str]) -> Tuple[bool, Dict, List[str]]:
     if not price_str:
         errors.append("missing price field")
 
-    # Only continue with format checks if all required fields are present
+    # Stop early if missing essential fields
     if errors:
         return False, {}, errors
 
-    # Validate flight_id: 2–8 alphanumeric
-    if not (2 <= len(flight_id) <= 8) or not flight_id.isalnum():
+    # Validate flight_id (2–8 alphanumeric characters)
+    if not (2 <= len(flight_id) <= 8 and flight_id.isalnum()):
         if len(flight_id) > 8:
             errors.append("flight_id too long (more than 8 characters)")
         else:
             errors.append("flight_id must be 2–8 alphanumeric characters")
 
-    # Validate origin/destination: 3 uppercase letters
+    # Validate IATA airport codes: must be 3 uppercase letters
     if not (len(origin) == 3 and origin.isalpha() and origin.isupper()):
         errors.append("invalid origin code")
     if not (len(destination) == 3 and destination.isalpha() and destination.isupper()):
         errors.append("invalid destination code")
 
-    # Validate datetimes
+    # Validate datetime fields
     dep_dt = None
     arr_dt = None
     try:
         dep_dt = datetime.strptime(dep_str, "%Y-%m-%d %H:%M")
     except ValueError:
         errors.append("invalid departure datetime")
+
     try:
         arr_dt = datetime.strptime(arr_str, "%Y-%m-%d %H:%M")
     except ValueError:
         errors.append("invalid arrival datetime")
 
+    # Ensure arrival > departure
     if dep_dt and arr_dt:
         if arr_dt <= dep_dt:
             errors.append("arrival before departure")
 
-    # Validate price: positive float
+    # Validate price
     try:
         price_val = float(price_str)
         if price_val < 0:
             errors.append("negative price value")
-        elif price_val == 0:
-            errors.append("non-positive price value")
     except ValueError:
         errors.append("invalid price value")
         price_val = None
 
+    # Return errors if found
     if errors:
         return False, {}, errors
 
+    # Return valid flight dictionary
     flight = {
         "flight_id": flight_id,
         "origin": origin,
@@ -96,16 +104,21 @@ def validate_flight_row(fields: List[str]) -> Tuple[bool, Dict, List[str]]:
         "arrival_datetime": arr_str,
         "price": price_val,
     }
+
     return True, flight, []
 
 
+
+# PARSE SINGLE CSV FILE
+
 def parse_csv_file(path: str) -> Tuple[List[Dict], List[str]]:
     """
-    Parse a single CSV file.
-    Returns (valid_flights, error_lines) where error_lines are ready-to-write strings.
+    Parse a single CSV file and return:
+      - list of valid flights
+      - list of error lines (ready to write into errors.txt)
     """
-    valid_flights: List[Dict] = []
-    error_lines: List[str] = []
+    valid_flights = []
+    error_lines = []
 
     try:
         with open(path, "r", encoding="utf-8") as f:
@@ -113,30 +126,33 @@ def parse_csv_file(path: str) -> Tuple[List[Dict], List[str]]:
                 line = raw_line.rstrip("\n")
                 stripped = line.strip()
 
-                # Ignore completely empty lines (no error output)
+                # Ignore empty lines
                 if stripped == "":
                     continue
 
-                # Header line
-                if line_num == 1 and stripped.lower().startswith("flight_id,origin,destination"):
+                # Skip header line
+                if line_num == 1 and stripped.lower().startswith("flight_id,origin"):
                     continue
 
-                # Comment line
+                # Identify comment lines
                 if stripped.startswith("#"):
-                    msg = f"Line {line_num}: {line} \u2192 comment line, ignored for data parsing"
-                    error_lines.append(msg)
+                    error_lines.append(
+                        f"Line {line_num}: {line} → comment line, ignored for data parsing"
+                    )
                     continue
 
-                # Parse CSV fields (simple split is enough here)
+                # Split CSV (simple split is OK here)
                 fields = [field.strip() for field in line.split(",")]
 
-                is_valid, flight, row_errors = validate_flight_row(fields)
+                # Validate row
+                is_valid, flight, row_errs = validate_flight_row(fields)
+
                 if is_valid:
                     valid_flights.append(flight)
                 else:
-                    reason = ", ".join(row_errors)
-                    msg = f"Line {line_num}: {line} \u2192 {reason}"
+                    msg = f"Line {line_num}: {line} → {', '.join(row_errs)}"
                     error_lines.append(msg)
+
     except FileNotFoundError:
         print(f"ERROR: File not found: {path}", file=sys.stderr)
     except OSError as e:
@@ -145,37 +161,50 @@ def parse_csv_file(path: str) -> Tuple[List[Dict], List[str]]:
     return valid_flights, error_lines
 
 
+
+# PARSE ALL CSV FILES IN FOLDER
+
 def parse_csv_folder(folder: str) -> Tuple[List[Dict], List[str]]:
     """
-    Parse all .csv files in a folder.
+    Parse all .csv files inside a folder (alphabetical order).
     """
-    all_valid: List[Dict] = []
-    all_errors: List[str] = []
+    all_valid = []
+    all_errors = []
 
     if not os.path.isdir(folder):
         print(f"ERROR: Not a directory: {folder}", file=sys.stderr)
         return [], []
 
     for name in sorted(os.listdir(folder)):
-        if not name.lower().endswith(".csv"):
-            continue
-        full_path = os.path.join(folder, name)
-        vf, errs = parse_csv_file(full_path)
-        all_valid.extend(vf)
-        all_errors.extend(errs)
+        if name.lower().endswith(".csv"):
+            path = os.path.join(folder, name)
+            vf, errs = parse_csv_file(path)
+            all_valid.extend(vf)
+            all_errors.extend(errs)
 
     return all_valid, all_errors
 
 
-def write_json_db(flights: List[Dict], output_path: str) -> None:
+
+# WRITE JSON DATABASE
+
+def write_json_db(flights: List[Dict], output_path: str):
+    """
+    Save valid flights into a JSON file.
+    """
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
     with open(output_path, "w", encoding="utf-8") as f:
         json.dump(flights, f, indent=2)
     print(f"Saved {len(flights)} valid flights to {output_path}")
 
 
-def write_errors_file(errors: List[str], output_path: str) -> None:
-    # If no errors, still create a small informative file
+
+# WRITE ERRORS TXT FILE
+
+def write_errors_file(errors: List[str], output_path: str):
+    """
+    Write all error lines to errors.txt.
+    """
     with open(output_path, "w", encoding="utf-8") as f:
         if not errors:
             f.write("No errors found.\n")
@@ -185,157 +214,166 @@ def write_errors_file(errors: List[str], output_path: str) -> None:
     print(f"Saved error report to {output_path}")
 
 
+
+# LOAD EXISTING db.json
+
 def load_json_db(path: str) -> List[Dict]:
+    """
+    Load a JSON database file.
+    """
     try:
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
         if isinstance(data, list):
             return data
-        else:
-            print("ERROR: JSON database must be a list of flight objects.", file=sys.stderr)
-            return []
-    except FileNotFoundError:
-        print(f"ERROR: JSON database not found: {path}", file=sys.stderr)
-    except json.JSONDecodeError as e:
-        print(f"ERROR: Failed to parse JSON database: {e}", file=sys.stderr)
-    return []
+        print("ERROR: JSON database must contain an array of flights.")
+        return []
+    except Exception as e:
+        print(f"ERROR reading JSON database: {e}")
+        return []
 
+
+
+# QUERY FUNCTIONS
 
 def load_query_file(path: str) -> List[Dict]:
+    """
+    Load queries from a JSON file (either object or array).
+    """
     try:
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
+
         if isinstance(data, dict):
             return [data]
         if isinstance(data, list):
             return data
-        print("ERROR: Query file must contain an object or a list of objects.", file=sys.stderr)
+
+        print("ERROR: Query file must contain an object or a list.")
         return []
-    except FileNotFoundError:
-        print(f"ERROR: Query file not found: {path}", file=sys.stderr)
-    except json.JSONDecodeError as e:
-        print(f"ERROR: Failed to parse query file: {e}", file=sys.stderr)
-    return []
+    except Exception as e:
+        print(f"ERROR reading query file: {e}")
+        return []
 
 
 def parse_datetime_safe(s: str):
+    """Convert string to datetime safely (returns None if invalid)."""
     try:
         return datetime.strptime(s, "%Y-%m-%d %H:%M")
-    except (TypeError, ValueError):
+    except:
         return None
 
 
 def match_query_on_flight(query: Dict, flight: Dict) -> bool:
     """
-    Check if a single flight matches a query according to rules.
+    Determine if a flight matches the query conditions.
+    Implements required filtering logic.
     """
     for key, value in query.items():
         if key in {"flight_id", "origin", "destination"}:
             if str(flight.get(key)) != str(value):
                 return False
+
         elif key == "departure_datetime":
-            q_dt = parse_datetime_safe(str(value))
-            f_dt = parse_datetime_safe(flight.get("departure_datetime"))
-            if not (q_dt and f_dt and f_dt >= q_dt):
+            q = parse_datetime_safe(value)
+            f = parse_datetime_safe(flight["departure_datetime"])
+            if not (q and f and f >= q):
                 return False
+
         elif key == "arrival_datetime":
-            q_dt = parse_datetime_safe(str(value))
-            f_dt = parse_datetime_safe(flight.get("arrival_datetime"))
-            if not (q_dt and f_dt and f_dt <= q_dt):
+            q = parse_datetime_safe(value)
+            f = parse_datetime_safe(flight["arrival_datetime"])
+            if not (q and f and f <= q):
                 return False
+
         elif key == "price":
             try:
-                q_price = float(value)
-                f_price = float(flight.get("price"))
-            except (TypeError, ValueError):
+                if float(flight["price"]) > float(value):
+                    return False
+            except:
                 return False
-            if f_price > q_price:
-                return False
-        else:
-            # Unknown field in query -> ignore it (do not fail)
-            pass
+
+        # Ignore unknown fields
     return True
 
 
 def run_queries(db: List[Dict], queries: List[Dict]) -> List[Dict]:
-    responses = []
+    """
+    Apply all queries to the database and return results.
+    """
+    results = []
     for q in queries:
-        matches = [flight for flight in db if match_query_on_flight(q, flight)]
-        responses.append({
-            "query": q,
-            "matches": matches
-        })
-    return responses
+        matches = [f for f in db if match_query_on_flight(q, f)]
+        results.append({"query": q, "matches": matches})
+    return results
 
 
 def build_response_filename() -> str:
-    now = datetime.now()
-    timestamp = now.strftime("%Y%m%d_%H%M")
-    # You MUST change the constants at the top of this file!
-    return f"response_{STUDENT_ID}_{STUDENT_NAME}_{STUDENT_LASTNAME}_{timestamp}.json"
+    """Generate required timestamped response filename."""
+    now = datetime.now().strftime("%Y%m%d_%H%M")
+    return f"response_{STUDENT_ID}_{STUDENT_NAME}_{STUDENT_LASTNAME}_{now}.json"
 
+
+
+# MAIN PROGRAM / CLI LOGIC
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Flight Schedule Parser and Query Tool"
-    )
+    parser = argparse.ArgumentParser(description="Flight Schedule Parser and Query Tool")
+
+    # Mutually exclusive group: either -i OR -d OR -j
     group = parser.add_mutually_exclusive_group()
-    group.add_argument("-i", "--input", help="Path to a CSV file with flights")
-    group.add_argument("-d", "--directory", help="Path to a folder with CSV files")
-    parser.add_argument("-o", "--output", help="Output JSON path for valid flights")
-    parser.add_argument("-j", "--jsondb", help="Use existing JSON database instead of parsing CSV")
+    group.add_argument("-i", "--input", help="Path to a CSV file")
+    group.add_argument("-d", "--directory", help="Folder containing CSV files")
+    group.add_argument("-j", "--jsondb", help="Use existing JSON database instead of CSV")
+
+    parser.add_argument("-o", "--output", help="Custom output path for db.json")
     parser.add_argument("-q", "--query", help="Path to query JSON file")
 
     args = parser.parse_args()
 
-    # Basic argument checks
+    db = []
+    errors = []
+
+    # Prevent conflicting arguments
     if args.jsondb and (args.input or args.directory):
-        print("ERROR: Use either -j (JSON database) OR -i / -d (CSV parsing), not both.", file=sys.stderr)
+        print("ERROR: Use -j OR -i/-d, not both.")
         sys.exit(1)
 
+    # Nothing selected?
     if not args.jsondb and not (args.input or args.directory):
         parser.print_help()
         sys.exit(1)
 
-    db: List[Dict] = []
-    errors: List[str] = []
-
-    # 1) Load or build database
+    # Load database (JSON or CSV parsing)
     if args.jsondb:
         db = load_json_db(args.jsondb)
-        if not db:
-            print("No flights loaded from JSON database.", file=sys.stderr)
     else:
-        # Parse CSV(s)
         if args.input:
             db, errors = parse_csv_file(args.input)
         elif args.directory:
             db, errors = parse_csv_folder(args.directory)
 
-        # Decide paths
-        output_db_path = args.output if args.output else "db.json"
-        if args.output:
-            errors_path = os.path.join(os.path.dirname(args.output) or ".", "errors.txt")
-        else:
-            errors_path = "errors.txt"
+        # Save parsed results
+        output_path = args.output if args.output else "db.json"
+        write_json_db(db, output_path)
 
-        write_json_db(db, output_db_path)
+        errors_path = os.path.join(os.path.dirname(output_path) or ".", "errors.txt")
         write_errors_file(errors, errors_path)
 
-    # 2) Optionally run queries
+    # Run queries if provided
     if args.query:
         if not db:
-            print("ERROR: No database loaded to run queries on.", file=sys.stderr)
+            print("ERROR: No database loaded for querying.")
             sys.exit(1)
+
         queries = load_query_file(args.query)
-        if not queries:
-            print("No valid queries loaded.", file=sys.stderr)
-            sys.exit(1)
         responses = run_queries(db, queries)
-        response_file = build_response_filename()
-        with open(response_file, "w", encoding="utf-8") as f:
+
+        response_filename = build_response_filename()
+        with open(response_filename, "w", encoding="utf-8") as f:
             json.dump(responses, f, indent=2)
-        print(f"Saved query responses to {response_file}")
+
+        print(f"Saved query results to {response_filename}")
 
 
 if __name__ == "__main__":
